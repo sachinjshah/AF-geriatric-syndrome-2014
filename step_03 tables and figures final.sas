@@ -1,19 +1,24 @@
 /*
+
 Geriatric syndrome in older adults with AF analysis
-Takes in analytic_file_v2 database
-and outputs:
-* Excel file for table 1
-* Excel file for table 2
-* database for Figure 1 -> R
-* database for Figure 2 -> R
+
+v3 updated 10/1/19
+- added output for figure 1 to go to stata
+- revised figure 2 to produced absolute rates instead of ORs
+
+V4 update 11/19/2019
+- update to remove matched control group
+
+V5 updated 1/9/20
+- clean up code
+
+V6 updated 1/14/20
+- adjust for chadsvasc score
+
+V7 updated 2/7 
+- added marginal effects
+ 
 */
-
-
-/*------------------------------------------------------
-
-Set up data
-
---------------------------------------------------------*/
 
 %LET path = C:\Users\sachi\Box Sync\AF frailty;
 libname in "&path\data\AF frailty 2014 crosssection";
@@ -130,8 +135,7 @@ PROC SURVEYMEANS data = af median Q1 Q3;
 ** to calculate the prevalence of individual geriatric syndromes;
 %macro prev(name);
 data _t; set af;
-* reassign those with missing data;
-if &name = . then cohort = 2; 
+if &name = . then cohort = 2;
 run;
 
 PROC SURVEYFREQ data = _t missing;
@@ -221,8 +225,9 @@ run;
 
 /*------------------------------------------------------
 
-FIGURE 2: GERIATRIC SYNDROMES x AC USE 
+FIGURE 1 VERSION 2: GERIATRIC SYNDROMES AS PREDICTOR OF AC USE 
 
+* notes in v6 on approach
 --------------------------------------------------------*/
 
 
@@ -294,7 +299,7 @@ run;
 %run_ar(adl, ADL, ADL intact, ADL difficulty, ADL dependent)
 %run_ar(IADL, IADL, IADL intact, IADL difficulty, IADL dependent)
 %run_ar(INCONTINENT, Incontinence, Not incontinent, Incontinent)
-%run_ar(cogfunction, Cognitive function, Cognitively intact, Cognitive impariment not dementia, Dementia)
+%run_ar(cogfunction, Cognitive function, Cognitively intact, Cognitive impairment not dementia, Dementia)
 
 ** used to create a figure that is not in the final paper
 to display the rate of AC us by GS level and its 95% CI;
@@ -382,7 +387,7 @@ quit;
 %margin_arr(zoom_a, ADL, ADL intact, ADL difficulty, ADL dependent);
 %margin_arr(zoom_i, IADL, IADL intact, IADL difficulty, IADL dependent);
 %margin_arr(INCONTINENT, Incontinence, Not incontinent, Incontinent);
-%margin_arr(cogfunction, Cognitive function, Cognitively intact, Cognitive impariment not dementia, Dementia);
+%margin_arr(cogfunction, Cognitive function, Cognitively intact, Cognitive impairment not dementia, Dementia);
 
 ** output the average marginal effects;
 data out.thinner_ame;
@@ -394,9 +399,53 @@ LL = Upper * -1;
 drop Upper Lower;
 run;
 
-** ouput predicted rate of AC use;
+** output predicted rate of AC use;
 data out.thinner_predicted;
 set P_:;
+run;
+
+/*
+Figure results as a table
+*/
+
+data thinner_ame;
+set out.thinner_ame;
+AME_UL = UL;
+AME_LL = LL;
+AME = Diff;
+drop UL LL StdErrDiff p Diff;
+run;
+
+proc sql;
+create table tabular_fig_2 as
+select * from out.thinner_predicted
+left join thinner_ame
+on thinner_predicted.syndrome = thinner_ame.syndrome and thinner_predicted.level = thinner_ame.level;
+quit;
+
+data tabular_fig_2;
+set tabular_fig_2;
+predicted_AC_use = estimate;
+predicted_AC_use_UL = UL;
+predicted_AC_use_LL = LL;
+
+array _nums {*} _numeric_;
+do i = 1 to dim(_nums);
+  _nums{i} = round(_nums{i},.001);
+end;
+drop i;
+
+drop StdErr estimate UL LL;
+run;
+
+proc export 
+  data=work.tabular_fig_2
+  dbms=xlsx 
+  outfile="&path\tables and figures\tabular_fig_2.xlsx" ; 
+  *need to delete old file, will not replace;
+run;
+
+data out.tabular_fig_2; set work.tabular_fig_2;
 run;
 
 ** clean up;
