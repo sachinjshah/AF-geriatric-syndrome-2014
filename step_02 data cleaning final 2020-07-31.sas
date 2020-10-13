@@ -20,13 +20,14 @@ data _af; set _c1 _c2;
 keep hhid pn af cohort op;
 run;
 
+** 6/27/2020 updated in review process;
 data _wts; set tr.trk2014tr_r;
 keep hhid pn
-stratum secu ;
+stratum secu ONURSHM;
 run;
 
 data _wts2; set r.randhrs1992_2014v2;
-keep hhid pn R12WTCRNH R12CESD;
+keep hhid pn R12WTCRNH R12CESD R12LIFTA R11WEIGHT R12WEIGHT;
 run;
 
 data _g14; set g14.h14g_r;
@@ -89,7 +90,13 @@ quit;
 ** add back in the original data on falls and incontinence 
 to code missing;
 data c_14; set in14.h14c_r;
-keep hhid pn OC079 OC080 OC081 OC087; 
+keep hhid pn OC079 OC080 OC081 OC087 OC095 OC103 WEIGHT_LOSS_SR DIZZY; 
+DIZZY = .;
+if OC145 =1 then DIZZY = 1;
+	else if OC145 in (8,9) then DIZZY = . ;
+	else DIZZY = 0;
+
+WEIGHT_LOSS_SR = (OC140 in (2, 3));
 run;
 
 proc sql;
@@ -133,7 +140,7 @@ if ADL_TOILET_HELP = 1 then ADL_TOILET = 2;
 ADL_WALK = 0;
 if ADL_WALK_DIFF in (.D, .R) then ADL_WALK = .;
 if ADL_WALK_DIFF in (1, 2, 9) then ADL_WALK = 1;
-if ADL_WALK_HELP = 1 then ADL_HELP = 2;
+if ADL_WALK_HELP = 1 then ADL_WALK = 2;
 
 ADL = .;
 if ADL_BATH = 0 and ADL_BED = 0 and ADL_DRESS = 0 
@@ -198,5 +205,116 @@ if R12CESD ge 4 then DEPRESSED = 1;
 RUN;
 
 
-data out.analytic_file_v2; set work.analytic_file;
+data analytic_file2; set analytic_file;
+/*PHYSICAL score calc*/
+	* first recode fall num;
+	FALL_NUM_RECODE = FALL_NUM;
+	if FALL_NUM in (997, 998, 98, 999, 99) then FALL_NUM_RECODE = .;
+	else if FALL_NUM = . then FALL_NUM_RECODE = 0;
+	else FALL_NUM_RECODE = (FALL_NUM ge 2);
+
+	NOLIFT10lb = 0;
+	if R12LIFTA in (1,.X) then NOLIFT10lb = 1;
+	if R12LIFTA in (.D, .R) then NOLIFT10lb = .;
+
+	FRAIL_physical = MIN(1,SUM(of DIZZY FALL_NUM_RECODE NOLIFT10lb));
+	if DIZZY =. OR FALL_NUM_RECODE =. OR NOLIFT10lb = . then FRAIL_physical =.;
+
+/*NUTRITIVE score calc*/
+	FRAIL_nutrition = 0;
+	WEIGHT_LOSS = 0;
+	if ((R11WEIGHT - R12WEIGHT)/R11WEIGHT) ge 0.1 then WEIGHT_LOSS = 1;
+	if ((R11WEIGHT - R12WEIGHT)/R11WEIGHT) = . then WEIGHT_LOSS = .;
+	UNDERWEIGHT = (0 < BMI < 18.5);
+	if BMI =.M then UNDERWEIGHT = .;
+
+	if UNDERWEIGHT = 1 then FRAIL_nutrition = 1;
+	else if WEIGHT_LOSS = 1 then FRAIL_nutrition = 1;
+	else if UNDERWEIGHT = . OR WEIGHT_LOSS = . then FRAIL_nutrition = .;
+
+/*COGNITION score*/
+	FRAIL_cognition = (cogfunction in (2, 3));
+
+/*SENSORY impairment*/
+	if OC095 in (8,9) then IMP_VISION =.;
+	if OC103 in (8,9) then IMP_HEARING = .;
+
+	FRAIL_sensory = 0;
+	if (IMP_VISION = 1) then FRAIL_sensory = 1;
+	else if (IMP_HEARING = 1) then FRAIL_sensory = 1;
+	else if IMP_VISION = . OR IMP_HEARING = . then FRAIL_sensory = .;
+
+	FRAIL = 0;
+	if ((FRAIL_physical + FRAIL_cognition + FRAIL_nutrition + FRAIL_sensory) ge 2) then FRAIL = 1;
+	if ((FRAIL_physical + FRAIL_cognition + FRAIL_nutrition + FRAIL_sensory) =.) then FRAIL = .;
+run;
+
+data out.analytic_file_v2; set work.analytic_file2;
+run;
+
+
+/*Sensitivity analysis on coding mistake*/
+
+
+data _t; set analytic_file;
+ADL_BATH = 0;
+if ADL_BATHING_DIFF in (.D, .R) then ADL_BATH = .;
+if ADL_BATHING_DIFF in (1, 2, 9) then ADL_BATH = 1;
+if ADL_BATH_HELP = 1 then ADL_BATH = 2; 
+
+ADL_BED = 0;
+if ADL_BED_DIFF in (.D, .R) then ADL_BED = .;
+if ADL_BED_DIFF in (1, 2, 9) then ADL_BED = 1;
+if ADL_BED_HELP = 1 then ADL_BED = 2;
+
+ADL_DRESS = 0;
+if ADL_DRESS_DIFF in (.D, .R) then ADL_DRESS = .;
+if ADL_DRESS_DIFF in (1, 2, 9) then ADL_DRESS = 1;
+if ADL_DRESS_HELP = 1 then ADL_DRESS = 2;
+
+ADL_EAT = 0;
+if ADL_EAT_DIFF in (.D, .R) then ADL_EAT = .;
+if ADL_EAT_DIFF in (1, 2, 9) then ADL_EAT = 1;
+if ADL_EAT_HELP = 1 then ADL_EAT = 2;
+
+ADL_TOILET = 0;
+if ADL_TOILET_DIFF in (.D, .R) then ADL_TOILET = .;
+if ADL_TOILET_DIFF in (1, 2, 9) then ADL_TOILET = 1;
+if ADL_TOILET_HELP = 1 then ADL_TOILET = 2;
+
+ADL_WALK = 0;
+if ADL_WALK_DIFF in (.D, .R) then ADL_WALK = .;
+if ADL_WALK_DIFF in (1, 2, 9) then ADL_WALK = 1;
+if ADL_WALK_HELP = 1 then ADL_help = 2;
+
+ADL = .;
+if ADL_BATH = 0 and ADL_BED = 0 and ADL_DRESS = 0 
+and ADL_EAT = 0 and ADL_TOILET = 0 and ADL_WALK = 0 
+then ADL = 1;
+
+if ADL_BATH = 1 or ADL_BED = 1 or ADL_DRESS = 1 or 
+ADL_EAT = 1 or ADL_TOILET = 1 or ADL_WALK = 1 
+then ADL = 2;
+
+if ADL_BATH = 2 or ADL_BED = 2 or ADL_DRESS = 2 or 
+ADL_EAT = 2 or ADL_TOILET = 2 or ADL_WALK = 2 
+then ADL = 3;
+
+if ADL_BATH = . then ADL = .;
+if ADL_BED = . then ADL = .;
+if ADL_DRESS = . then ADL = .;
+if ADL_EAT = . then ADL = .;
+if ADL_TOILET = . then ADL = .;
+if ADL_WALK = . then ADL = .;
+
+run;
+
+proc freq data = analytic_file;
+tables ADL / missing;
+where cohort = 2;
+run;
+
+proc freq data = _t;
+tables ADL / missing;
+where cohort = 2;
 run;

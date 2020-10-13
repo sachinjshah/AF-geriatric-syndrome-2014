@@ -1,25 +1,3 @@
-/*
-
-Geriatric syndrome in older adults with AF analysis
-
-v3 updated 10/1/19
-- added output for figure 1 to go to stata
-- revised figure 2 to produced absolute rates instead of ORs
-
-V4 update 11/19/2019
-- update to remove matched control group
-
-V5 updated 1/9/20
-- clean up code
-
-V6 updated 1/14/20
-- adjust for chadsvasc score
-
-V7 updated 2/7 
-- added marginal effects
- 
-*/
-
 %LET path = C:\Users\sachi\Box Sync\AF frailty;
 libname in "&path\data\AF frailty 2014 crosssection";
 libname out "&path\tables and figures";
@@ -40,11 +18,15 @@ if cohort = . then af = 0;
 if cohort = . then cohort = 2; 
 
 ** US guideline recs;
-guideline = 0;
-if ragender = 1 and chadsvasc_collapsed ge 2 then guideline = 1;
-if ragender = 2 and chadsvasc_collapsed ge 3 then guideline = 1;
+guideline19 = 0;
+if ragender = 1 and chadsvasc_collapsed ge 2 then guideline19 = 1;
+if ragender = 2 and chadsvasc_collapsed ge 3 then guideline19 = 1;
+
+guideline14 = 0;
+if chadsvasc_collapsed ge 2 then guideline14 = 1;
 run;
 
+proc contents; run;
 
 /*------------------------------------------------------
 
@@ -87,8 +69,8 @@ tables  cohort * (
 RAGENDER MARRIED LIVES_ALONE EDU RARACEM RAHISPAN
 op FAIR_POOR_HEALTH DEPRESSED EVER_HF HTN
 STROKE DM EVER_MI EVER_ANGINA LUNG_EVER CANCER_EVER CHADSVASC 
-guideline BLOOD_THINNER)
- /  row chisq nocellpercent nowt nototal cl;
+guideline19 guideline14  BLOOD_THINNER ONURSHM)
+ /  row chisq nocellpercent nowt nototal cl(type=cp);
 run;
 ods output close;
 
@@ -96,11 +78,11 @@ ods output close;
 data table1_cross; set table1_cross;
 level = sum(of RAGENDER MARRIED LIVES_ALONE EDU RARACEM RAHISPAN
 op FAIR_POOR_HEALTH DEPRESSED EVER_HF HTN
-STROKE DM EVER_MI EVER_ANGINA LUNG_EVER CANCER_EVER CHADSVASC guideline BLOOD_THINNER);
+STROKE DM EVER_MI EVER_ANGINA LUNG_EVER CANCER_EVER CHADSVASC guideline19 guideline14 BLOOD_THINNER);
 
 drop RAGENDER MARRIED LIVES_ALONE EDU RARACEM RAHISPAN
 op FAIR_POOR_HEALTH DEPRESSED EVER_HF HTN
-STROKE DM EVER_MI EVER_ANGINA LUNG_EVER CANCER_EVER CHADSVASC guideline BLOOD_THINNER _: F_:; ** clean up extraneous variables;
+STROKE DM EVER_MI EVER_ANGINA LUNG_EVER CANCER_EVER CHADSVASC guideline19 guideline14 BLOOD_THINNER _: F_:; ** clean up extraneous variables;
 * if matched = 0 then delete; ** drop the sections that are not relevant;
 run;
 
@@ -144,7 +126,7 @@ PROC SURVEYFREQ data = _t missing;
 	strata stratum;
 	cluster secu;
 	tables  cohort * &name
- /  row nocellpercent nowt nototal cl ;
+ /  row nocellpercent nowt nototal cl(type=cp) ;
 run; 
 %mend;
 
@@ -184,6 +166,8 @@ FIGURE 1: COUNT OF GS X AC USE version 2
 ** limit the dataset to those with AF and with AC use data;
 data af2; set af; 
 where af = 1 and BLOOD_THINNER ne .N and GERI_SYN_COUNT ne .;
+log_GERI_SYN_COUNT = log(GERI_SYN_COUNT+0.1);
+sq_GERI_SYN_COUNT = GERI_SYN_COUNT ** 2;
 run;
 
 ** base model;
@@ -191,6 +175,43 @@ proc genmod data = af2 descending;
 	model BLOOD_THINNER = chadsvasc GERI_SYN_COUNT / 
 		dist = bin link = log;
 run;
+
+** assess functional form;
+
+* linear 
+BIC (smaller is better)   982.5082   ;
+
+proc genmod data = af2 descending; 
+	model BLOOD_THINNER = chadsvasc GERI_SYN_COUNT / 
+		dist = bin link = log;
+run;
+
+* categorical
+BIC (smaller is better)   1006.4442 
+ ;
+proc genmod data = af2 descending; 
+class GERI_SYN_COUNT;
+model BLOOD_THINNER = chadsvasc GERI_SYN_COUNT / 
+		dist = bin link = log;
+run;
+
+*quadratic
+BIC (smaller is better)   987.0662  ;
+
+proc genmod data = af2 descending; 
+	model BLOOD_THINNER = chadsvasc GERI_SYN_COUNT sq_GERI_SYN_COUNT / 
+		dist = bin link = log;
+run;
+
+*log
+BIC (smaller is better)   989.0107  ;
+
+proc genmod data = af2 descending; 
+	model BLOOD_THINNER = chadsvasc log_GERI_SYN_COUNT / 
+		dist = bin link = log;
+run;
+
+
 
 ** set up data for marginal effects;
 data _me; 
@@ -225,7 +246,7 @@ run;
 
 /*------------------------------------------------------
 
-FIGURE 1 VERSION 2: GERIATRIC SYNDROMES AS PREDICTOR OF AC USE 
+FIGURE 2: GERIATRIC SYNDROMES AS PREDICTOR OF AC USE 
 
 * notes in v6 on approach
 --------------------------------------------------------*/
